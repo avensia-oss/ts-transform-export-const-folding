@@ -1,0 +1,24 @@
+// Place your settings in this file to overwrite default and user settings.
+{
+  "typescript.tsdk": "./node_modules/typescript/lib",
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "src/Avensia.Manager/*": true,
+    "src/Avensia.Shop/assets/*": true,
+    "**/Assets/*": true,
+    "tools/": true,
+    "Publish/": true,
+    "Artifacts/": true,
+    "**/bin/": true,
+    "**/obj/": true,
+    "*.orig": true,
+    "*.dll": true,
+    "*.log": true,
+    "**/packages/": true
+  },
+  "prettier.printWidth": 120,
+  "prettier.singleQuote": true,
+  "prettier.trailingComma": "all",
+  "editor.formatOnSave": true
+}

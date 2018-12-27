@@ -1,0 +1,28 @@
+{
+  "name": "ts-transform-constant-folding",
+  "version": "0.01",
+  "description": "A TypeScript custom transformer that inlines values of constants",
+  "main": "index.ts",
+  "keywords": [
+    "TypeScript",
+    "transform",
+    "transformer",
+    "constant",
+    "folding"
+  ],
+  "author": "Anders Ekdahl <anders.ekdahl@gmail.com>",
+  "license": "MIT",
+  "private": false,
+  "dependencies": {
+    "typescript": "^3.2.2"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@types/jest": "^23.3.10",
+    "@types/node": "^10.12.18",
+    "jest": "^23.6.0",
+    "ts-jest": "^23.10.5"
+  }
+}
