@@ -112,6 +112,34 @@ let y = x;
   expectEqual(expected, compile(code));
 });
 
+test('exporting a previously declared const with a different name works', () => {
+  const code = {
+    'file1.ts': `
+const x = "constantvalue";
+const y = 1;
+export { x as z, y };
+`,
+    'file2.ts': `
+import { z } from "./file1";
+let y = z;
+    `,
+  };
+
+  const expected = {
+    'file1.js': `
+const x = "constantvalue";
+const y = 1;
+export { x as z, y };
+`,
+    'file2.js': `
+const z = "constantvalue"
+let y = z;
+`,
+  };
+
+  expectEqual(expected, compile(code));
+});
+
 function expectEqual(expected: Code, compiled: Code) {
   Object.keys(expected).forEach(fileName => {
     expect(compiled[fileName].trim()).toBe(expected[fileName].trim());

@@ -1,5 +1,5 @@
 {
-  "name": "ts-transform-constant-folding",
+  "name": "@avensia-oss/ts-transform-export-const-folding",
   "version": "0.01",
   "description": "A TypeScript custom transformer that inlines values of constants",
   "main": "index.ts",
@@ -23,6 +23,7 @@
     "@types/jest": "^23.3.10",
     "@types/node": "^10.12.18",
     "jest": "^23.6.0",
+    "prettier": "^1.15.3",
     "ts-jest": "^23.10.5"
   }
 }

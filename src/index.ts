@@ -46,11 +46,9 @@ function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
           if (declaration && isVariableDeclaration(declaration)) {
             if (declaration.parent.flags === ts.NodeFlags.Const) {
               constantValueExpression = getConstantValue(declaration.initializer);
-            } else {
-              //console.info('Skipping', declaration.name, "since it's a variable but not a const");
             }
           } else if (exported.declarations.length && exported.declarations[0].kind === ts.SyntaxKind.ExportSpecifier) {
-            const decl = exported.declarations[0];
+            const decl = exported.declarations[0] as ts.ExportSpecifier;
             if (
               decl.parent &&
               decl.parent.parent &&
@@ -62,11 +60,16 @@ function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
                 s => s.kind === ts.SyntaxKind.VariableStatement,
               ) as ts.VariableStatement[];
 
+              let localVariableToLookFor = importedIdentifier;
+              if (decl.propertyName) {
+                localVariableToLookFor = decl.propertyName.escapedText.toString();
+              }
+
               const importedVariable = variables.find(
-                v => (v.declarationList.declarations[0].name as ts.Identifier).escapedText === importedIdentifier,
+                v => (v.declarationList.declarations[0].name as ts.Identifier).escapedText === localVariableToLookFor,
               );
 
-              if (importedVariable.declarationList.flags === ts.NodeFlags.Const) {
+              if (importedVariable && importedVariable.declarationList.flags === ts.NodeFlags.Const) {
                 constantValueExpression = getConstantValue(
                   importedVariable.declarationList.declarations[0].initializer,
                 );
