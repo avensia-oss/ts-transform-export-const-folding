@@ -84,7 +84,7 @@ y();
   expectEqual(expected, compile(code));
 });
 
-test.only('exporting a previously declared const works', () => {
+test('exporting a previously declared const works', () => {
   const code = {
     'file1.ts': `
 const x = "constantvalue";
@@ -104,7 +104,7 @@ const y = 1;
 export { x, y };
 `,
     'file2.js': `
-const x = "constantvalue";
+const x = "constantvalue"
 let y = x;
 `,
   };

@@ -38,7 +38,8 @@ function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
       const exports = typeChecker.getExportsOfModule(importSymbol);
 
       for (const element of namedBindings.elements) {
-        const exported = exports.find(e => e.name === element.name.escapedText.toString());
+        const importedIdentifier = element.name.escapedText.toString();
+        const exported = exports.find(e => e.name === importedIdentifier);
         if (exported) {
           const declaration = exported.valueDeclaration;
           let constantValueExpression: ts.Expression = null;
@@ -49,8 +50,28 @@ function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
               //console.info('Skipping', declaration.name, "since it's a variable but not a const");
             }
           } else if (exported.declarations.length && exported.declarations[0].kind === ts.SyntaxKind.ExportSpecifier) {
-            console.log(exported as any /*.parent.valueDeclaration*/);
-            console.log(exported.declarations[0].parent);
+            const decl = exported.declarations[0];
+            if (
+              decl.parent &&
+              decl.parent.parent &&
+              decl.parent.parent.parent &&
+              decl.parent.parent.parent.kind === ts.SyntaxKind.SourceFile
+            ) {
+              const sourceFile = decl.parent.parent.parent as ts.SourceFile;
+              const variables = sourceFile.statements.filter(
+                s => s.kind === ts.SyntaxKind.VariableStatement,
+              ) as ts.VariableStatement[];
+
+              const importedVariable = variables.find(
+                v => (v.declarationList.declarations[0].name as ts.Identifier).escapedText === importedIdentifier,
+              );
+
+              if (importedVariable.declarationList.flags === ts.NodeFlags.Const) {
+                constantValueExpression = getConstantValue(
+                  importedVariable.declarationList.declarations[0].initializer,
+                );
+              }
+            }
           }
           if (constantValueExpression) {
             constants[element.name.escapedText.toString()] = constantValueExpression;
