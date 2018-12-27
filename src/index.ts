@@ -28,6 +28,8 @@ function visitNodeAndChildren(
 
 function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
   const typeChecker = program.getTypeChecker();
+  // We want to replace `import { x } from 'file';`
+  // with `const x = 'x';` if we can prove that `x` has a constant, compile time value
   if (isImportDeclaration(node)) {
     const nodes: ts.Node[] = [node];
     const namedBindings = node.importClause.namedBindings;
@@ -62,6 +64,8 @@ function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
       }
     }
   } else if (isExportFromFileDeclaration(node)) {
+    // We want to replace `export { x } from 'file';`
+    // with `const x = 'x';` if we can prove that `x` has a constant, compile time value
     const nodes: ts.Node[] = [node];
     const exportFromSymbol = typeChecker.getSymbolAtLocation(node.moduleSpecifier);
     const exportSymbols = typeChecker.getExportsOfModule(exportFromSymbol);
@@ -96,6 +100,17 @@ function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
           ),
           node.moduleSpecifier,
         );
+        nodes.push(
+          ts.createExportDeclaration(
+            node.decorators,
+            node.modifiers,
+            ts.createNamedExports(
+              identifierNames
+                .filter(i => exportNames.indexOf(i) !== -1)
+                .map(i => ts.createExportSpecifier(undefined, i)),
+            ),
+          ),
+        );
         nodes.splice(nodes.indexOf(node), 1, newNode);
       }
 
@@ -112,16 +127,23 @@ function getConstantValueExpressions(
 ) {
   let constants = {};
   for (const element of elements) {
-    const importedIdentifier = element.name.escapedText.toString();
+    const importedIdentifier = (element.propertyName || element.name).escapedText.toString();
     const exported = exportSymbols.find(e => e.name === importedIdentifier);
     if (exported) {
       const declaration = exported.valueDeclaration;
       let constantValueExpression: ts.Expression = null;
+
+      // This checks for `export const x = 'x';`
       if (declaration && isVariableDeclaration(declaration)) {
         if (declaration.parent.flags === ts.NodeFlags.Const) {
+          // Note that we only get a constant expression here if the value is a
+          // literal. If it's another variable such as `export const x = y;` we bail
+          // because we don't follow assignments more than exports and imports.
           constantValueExpression = getConstantValue(declaration.initializer);
         }
       } else if (exported.declarations.length && exported.declarations[0].kind === ts.SyntaxKind.ExportSpecifier) {
+        // If we end up here it means that it's `export { x };` so we need to grab the source file
+        // and look for identifiers
         const decl = exported.declarations[0] as ts.ExportSpecifier;
         if (
           decl.parent &&
@@ -134,17 +156,23 @@ function getConstantValueExpressions(
             s => s.kind === ts.SyntaxKind.VariableStatement,
           ) as ts.VariableStatement[];
 
+          // This deals with the fact that it's possible to `export { x as y }` and
+          // `import { x as y }`
           let localVariableToLookFor = importedIdentifier;
           if (decl.propertyName) {
             localVariableToLookFor = decl.propertyName.escapedText.toString();
           }
 
-          const importedVariable = variables.find(
+          const exportedVariable = variables.find(
             v => (v.declarationList.declarations[0].name as ts.Identifier).escapedText === localVariableToLookFor,
           );
 
-          if (importedVariable && importedVariable.declarationList.flags === ts.NodeFlags.Const) {
-            constantValueExpression = getConstantValue(importedVariable.declarationList.declarations[0].initializer);
+          // This checks for
+          // ```
+          // const x = 'x';
+          // export { x };
+          if (exportedVariable && exportedVariable.declarationList.flags === ts.NodeFlags.Const) {
+            constantValueExpression = getConstantValue(exportedVariable.declarationList.declarations[0].initializer);
           } else {
             const exportDeclarations = sourceFile.statements.filter(
               s => s.kind === ts.SyntaxKind.ExportDeclaration,
@@ -155,6 +183,9 @@ function getConstantValueExpressions(
               ),
             );
 
+            // This checks for `export { x } from 'file';` where `x` is the variable we want
+            // If `moduleSpecifier` is set it means that it's a `export { x } from 'file';`
+            // and not just a `export { x };`
             if (exportDeclaration && exportDeclaration.moduleSpecifier) {
               const exportSymbol = typeChecker.getSymbolAtLocation(exportDeclaration.moduleSpecifier);
               const exportSymbols = typeChecker.getExportsOfModule(exportSymbol);
@@ -164,24 +195,20 @@ function getConstantValueExpressions(
                 typeChecker,
               );
 
-              if (localVariableToLookFor !== importedIdentifier) {
-                innerConstants[importedIdentifier] = innerConstants[localVariableToLookFor];
-                delete innerConstants[localVariableToLookFor];
-              }
+              handleAlias(innerConstants, localVariableToLookFor, importedIdentifier);
 
               constants = {
                 ...constants,
                 ...innerConstants,
               };
             } else {
+              // This checks for `import { x } from 'file';` where `x` is the variable we want
               const importDeclarations = sourceFile.statements.filter(
                 s => s.kind === ts.SyntaxKind.ImportDeclaration,
               ) as ts.ImportDeclaration[];
 
               const importDeclaration = importDeclarations.find(i =>
-                getImportElements(i).some(
-                  e => (e.propertyName || e.name).escapedText.toString() === localVariableToLookFor,
-                ),
+                getImportElements(i).some(e => e.name.escapedText.toString() === localVariableToLookFor),
               );
 
               if (importDeclaration) {
@@ -193,10 +220,7 @@ function getConstantValueExpressions(
                   typeChecker,
                 );
 
-                if (localVariableToLookFor !== importedIdentifier) {
-                  innerConstants[importedIdentifier] = innerConstants[localVariableToLookFor];
-                  delete innerConstants[localVariableToLookFor];
-                }
+                handleAlias(innerConstants, localVariableToLookFor, importedIdentifier);
 
                 constants = {
                   ...constants,
@@ -213,6 +237,17 @@ function getConstantValueExpressions(
     }
   }
   return constants;
+}
+
+function handleAlias(constants: {}, localVariableToLookFor: string, importedIdentifier: string) {
+  // `constants` keys will be the names of the exports from the other module, but
+  // this module might have imported with a different name such as `import { x as y } from 'file';`
+  // which means that we have to remove `x` as key from `constants` and add that value in
+  // `constants['y']` instead.
+  if (localVariableToLookFor !== importedIdentifier) {
+    constants[importedIdentifier] = constants[localVariableToLookFor];
+    delete constants[localVariableToLookFor];
+  }
 }
 
 function getImportElements(importDeclaration: ts.ImportDeclaration): ts.NodeArray<ts.ImportSpecifier> {
@@ -244,7 +279,7 @@ function getConstantValue(expression: ts.Expression) {
   } else if (expression.kind === ts.SyntaxKind.NullKeyword) {
     return ts.createNull();
   } else if (expression.kind === ts.SyntaxKind.UndefinedKeyword) {
-    return ts.createLiteral('undefined'); // TODO
+    return null; // TODO: For some reason there's no ts.createUndefined()
   }
   return null;
 }

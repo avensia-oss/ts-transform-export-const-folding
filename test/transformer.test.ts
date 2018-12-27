@@ -173,6 +173,42 @@ let y = x;
   expectEqual(expected, compile(code));
 });
 
+test('importing a constant from a module which exports it and other variables works', () => {
+  const code = {
+    'file1.ts': `
+const x = "constantvalue";
+const y = () => true;
+export { x, y };
+  `,
+    'file2.ts': `
+export { x, y } from './file1';
+      `,
+    'file3.ts': `
+import { x } from './file2';
+let y = x;
+      `,
+  };
+
+  const expected = {
+    'file1.js': `
+const x = "constantvalue";
+const y = () => true;
+export { x, y };
+  `,
+    'file2.js': `
+export { y } from './file1';
+const x = "constantvalue"
+export { x };
+      `,
+    'file3.js': `
+const x = "constantvalue"
+let y = x;
+      `,
+  };
+
+  expectEqual(expected, compile(code));
+});
+
 test('importing a constant from a module which exports it after first importing it works', () => {
   const code = {
     'file1.ts': `
@@ -241,8 +277,42 @@ let y = x;
   expectEqual(expected, compile(code));
 });
 
+test('importing a constant with a different name from a module which exports it with a different after first importing it works', () => {
+  const code = {
+    'file1.ts': `
+const y = "constantvalue";
+export { y };
+    `,
+    'file2.ts': `
+import { y as z } from './file1';
+export { z as x };
+        `,
+    'file3.ts': `
+import { x } from './file2';
+let y = x;
+        `,
+  };
+
+  const expected = {
+    'file1.js': `
+const y = "constantvalue";
+export { y };
+    `,
+    'file2.js': `
+const z = "constantvalue"
+export { z as x };
+        `,
+    'file3.js': `
+const x = "constantvalue"
+let y = x;
+        `,
+  };
+
+  expectEqual(expected, compile(code));
+});
+
 function expectEqual(expected: Code, compiled: Code) {
   Object.keys(expected).forEach(fileName => {
-    expect(compiled[fileName].trim()).toBe(expected[fileName].trim());
+    expect(fileName + ':\n' + compiled[fileName].trim()).toBe(fileName + ':\n' + expected[fileName].trim());
   });
 }
