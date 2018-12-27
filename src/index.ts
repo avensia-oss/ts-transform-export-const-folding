@@ -31,56 +31,11 @@ function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
   if (isImportDeclaration(node)) {
     const nodes: ts.Node[] = [node];
     const namedBindings = node.importClause.namedBindings;
-    const constants = {};
 
     if (isNamedImports(namedBindings)) {
       const importSymbol = typeChecker.getSymbolAtLocation(node.moduleSpecifier);
-      const exports = typeChecker.getExportsOfModule(importSymbol);
-
-      for (const element of namedBindings.elements) {
-        const importedIdentifier = element.name.escapedText.toString();
-        const exported = exports.find(e => e.name === importedIdentifier);
-        if (exported) {
-          const declaration = exported.valueDeclaration;
-          let constantValueExpression: ts.Expression = null;
-          if (declaration && isVariableDeclaration(declaration)) {
-            if (declaration.parent.flags === ts.NodeFlags.Const) {
-              constantValueExpression = getConstantValue(declaration.initializer);
-            }
-          } else if (exported.declarations.length && exported.declarations[0].kind === ts.SyntaxKind.ExportSpecifier) {
-            const decl = exported.declarations[0] as ts.ExportSpecifier;
-            if (
-              decl.parent &&
-              decl.parent.parent &&
-              decl.parent.parent.parent &&
-              decl.parent.parent.parent.kind === ts.SyntaxKind.SourceFile
-            ) {
-              const sourceFile = decl.parent.parent.parent as ts.SourceFile;
-              const variables = sourceFile.statements.filter(
-                s => s.kind === ts.SyntaxKind.VariableStatement,
-              ) as ts.VariableStatement[];
-
-              let localVariableToLookFor = importedIdentifier;
-              if (decl.propertyName) {
-                localVariableToLookFor = decl.propertyName.escapedText.toString();
-              }
-
-              const importedVariable = variables.find(
-                v => (v.declarationList.declarations[0].name as ts.Identifier).escapedText === localVariableToLookFor,
-              );
-
-              if (importedVariable && importedVariable.declarationList.flags === ts.NodeFlags.Const) {
-                constantValueExpression = getConstantValue(
-                  importedVariable.declarationList.declarations[0].initializer,
-                );
-              }
-            }
-          }
-          if (constantValueExpression) {
-            constants[element.name.escapedText.toString()] = constantValueExpression;
-          }
-        }
-      }
+      const exportSymbols = typeChecker.getExportsOfModule(importSymbol);
+      const constants = getConstantValueExpressions(namedBindings.elements, exportSymbols, typeChecker);
 
       const identifierNames = Object.keys(constants);
       if (identifierNames.length) {
@@ -102,19 +57,131 @@ function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
           );
           nodes.splice(nodes.indexOf(node), 1, newNode);
         }
+
+        return nodes;
       }
     }
+  } else if (isExportFromFileDeclaration(node)) {
+    const nodes: ts.Node[] = [node];
+    const exportFromSymbol = typeChecker.getSymbolAtLocation(node.moduleSpecifier);
+    const exportSymbols = typeChecker.getExportsOfModule(exportFromSymbol);
+    const constants = getConstantValueExpressions(node.exportClause.elements, exportSymbols, typeChecker);
 
-    return nodes;
+    const identifierNames = Object.keys(constants);
+    if (identifierNames.length) {
+      identifierNames.forEach(i => {
+        nodes.push(
+          ts.createVariableDeclarationList([ts.createVariableDeclaration(i, null, constants[i])], ts.NodeFlags.Const),
+        );
+      });
+
+      const exportNames = node.exportClause.elements.map(e => e.name.escapedText.toString());
+      if (exportNames.every(i => identifierNames.indexOf(i) !== -1)) {
+        nodes.splice(nodes.indexOf(node), 1);
+        nodes.push(
+          ts.createExportDeclaration(
+            node.decorators,
+            node.modifiers,
+            ts.createNamedExports(identifierNames.map(i => ts.createExportSpecifier(undefined, i))),
+          ),
+        );
+      } else {
+        const newNode = ts.createExportDeclaration(
+          node.decorators,
+          node.modifiers,
+          ts.createNamedExports(
+            node.exportClause.elements.filter(
+              e => identifierNames.indexOf((e.propertyName || e.name).escapedText.toString()) === -1,
+            ),
+          ),
+          node.moduleSpecifier,
+        );
+        nodes.splice(nodes.indexOf(node), 1, newNode);
+      }
+
+      return nodes;
+    }
   }
   return node;
+}
+
+function getConstantValueExpressions(
+  elements: ts.NodeArray<ts.ImportSpecifier> | ts.NodeArray<ts.ExportSpecifier>,
+  exportSymbols: ts.Symbol[],
+  typeChecker: ts.TypeChecker,
+) {
+  let constants = {};
+  for (const element of elements) {
+    const importedIdentifier = element.name.escapedText.toString();
+    const exported = exportSymbols.find(e => e.name === importedIdentifier);
+    if (exported) {
+      const declaration = exported.valueDeclaration;
+      let constantValueExpression: ts.Expression = null;
+      if (declaration && isVariableDeclaration(declaration)) {
+        if (declaration.parent.flags === ts.NodeFlags.Const) {
+          constantValueExpression = getConstantValue(declaration.initializer);
+        }
+      } else if (exported.declarations.length && exported.declarations[0].kind === ts.SyntaxKind.ExportSpecifier) {
+        const decl = exported.declarations[0] as ts.ExportSpecifier;
+        if (
+          decl.parent &&
+          decl.parent.parent &&
+          decl.parent.parent.parent &&
+          decl.parent.parent.parent.kind === ts.SyntaxKind.SourceFile
+        ) {
+          const sourceFile = decl.parent.parent.parent as ts.SourceFile;
+          const variables = sourceFile.statements.filter(
+            s => s.kind === ts.SyntaxKind.VariableStatement,
+          ) as ts.VariableStatement[];
+
+          let localVariableToLookFor = importedIdentifier;
+          if (decl.propertyName) {
+            localVariableToLookFor = decl.propertyName.escapedText.toString();
+          }
+
+          const importedVariable = variables.find(
+            v => (v.declarationList.declarations[0].name as ts.Identifier).escapedText === localVariableToLookFor,
+          );
+
+          if (importedVariable && importedVariable.declarationList.flags === ts.NodeFlags.Const) {
+            constantValueExpression = getConstantValue(importedVariable.declarationList.declarations[0].initializer);
+          } else {
+            const exportDeclarations = sourceFile.statements.filter(
+              s => s.kind === ts.SyntaxKind.ExportDeclaration,
+            ) as ts.ExportDeclaration[];
+            const exportDeclaration = exportDeclarations.find(e =>
+              e.exportClause.elements.some(
+                e => (e.propertyName || e.name).escapedText.toString() === localVariableToLookFor,
+              ),
+            );
+
+            const exportSymbol = typeChecker.getSymbolAtLocation(exportDeclaration.moduleSpecifier);
+            const exportSymbols = typeChecker.getExportsOfModule(exportSymbol);
+            const innerConstants = getConstantValueExpressions(
+              exportDeclaration.exportClause.elements,
+              exportSymbols,
+              typeChecker,
+            );
+            constants = {
+              ...constants,
+              ...innerConstants,
+            };
+          }
+        }
+      }
+      if (constantValueExpression) {
+        constants[element.name.escapedText.toString()] = constantValueExpression;
+      }
+    }
+  }
+  return constants;
 }
 
 function removeImportNames(namedBindings: ts.NamedImports, importNamesToRemove: string[]): ts.NamedImports {
   return {
     ...namedBindings,
     elements: (namedBindings.elements.filter(
-      e => importNamesToRemove.indexOf((e.name || e.propertyName).text) === -1,
+      e => importNamesToRemove.indexOf((e.propertyName || e.name).text) === -1,
     ) as any) as ts.NodeArray<ts.ImportSpecifier>,
   };
 }
@@ -146,6 +213,14 @@ function isNamedImports(x: ts.NamedImportBindings): x is ts.NamedImports {
 
 function isImportDeclaration(node: ts.Node): node is ts.ImportDeclaration {
   if (node.kind === ts.SyntaxKind.ImportDeclaration) {
+    return true;
+  }
+  return false;
+}
+
+function isExportFromFileDeclaration(node: ts.Node): node is ts.ExportDeclaration {
+  const exp = node as ts.ExportDeclaration;
+  if (exp.kind === ts.SyntaxKind.ExportDeclaration && exp.moduleSpecifier) {
     return true;
   }
   return false;
