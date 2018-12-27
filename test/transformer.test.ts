@@ -173,6 +173,40 @@ let y = x;
   expectEqual(expected, compile(code));
 });
 
+test('importing a constant from a module which exports it after first importing it works', () => {
+  const code = {
+    'file1.ts': `
+const x = "constantvalue";
+export { x };
+`,
+    'file2.ts': `
+import { x } from './file1';
+export { x };
+    `,
+    'file3.ts': `
+import { x } from './file2';
+let y = x;
+    `,
+  };
+
+  const expected = {
+    'file1.js': `
+const x = "constantvalue";
+export { x };
+`,
+    'file2.js': `
+const x = "constantvalue"
+export { x };
+    `,
+    'file3.js': `
+const x = "constantvalue"
+let y = x;
+    `,
+  };
+
+  expectEqual(expected, compile(code));
+});
+
 function expectEqual(expected: Code, compiled: Code) {
   Object.keys(expected).forEach(fileName => {
     expect(compiled[fileName].trim()).toBe(expected[fileName].trim());

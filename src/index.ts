@@ -155,17 +155,41 @@ function getConstantValueExpressions(
               ),
             );
 
-            const exportSymbol = typeChecker.getSymbolAtLocation(exportDeclaration.moduleSpecifier);
-            const exportSymbols = typeChecker.getExportsOfModule(exportSymbol);
-            const innerConstants = getConstantValueExpressions(
-              exportDeclaration.exportClause.elements,
-              exportSymbols,
-              typeChecker,
-            );
-            constants = {
-              ...constants,
-              ...innerConstants,
-            };
+            if (exportDeclaration && exportDeclaration.moduleSpecifier) {
+              const exportSymbol = typeChecker.getSymbolAtLocation(exportDeclaration.moduleSpecifier);
+              const exportSymbols = typeChecker.getExportsOfModule(exportSymbol);
+              const innerConstants = getConstantValueExpressions(
+                exportDeclaration.exportClause.elements,
+                exportSymbols,
+                typeChecker,
+              );
+              constants = {
+                ...constants,
+                ...innerConstants,
+              };
+            } else {
+              const importDeclarations = sourceFile.statements.filter(
+                s => s.kind === ts.SyntaxKind.ImportDeclaration,
+              ) as ts.ImportDeclaration[];
+
+              const importDeclaration = importDeclarations.find(i =>
+                getImportElements(i).some(
+                  e => (e.propertyName || e.name).escapedText.toString() === localVariableToLookFor,
+                ),
+              );
+
+              const importSymbol = typeChecker.getSymbolAtLocation(importDeclaration.moduleSpecifier);
+              const importSymbols = typeChecker.getExportsOfModule(importSymbol);
+              const innerConstants = getConstantValueExpressions(
+                getImportElements(importDeclaration),
+                importSymbols,
+                typeChecker,
+              );
+              constants = {
+                ...constants,
+                ...innerConstants,
+              };
+            }
           }
         }
       }
@@ -175,6 +199,14 @@ function getConstantValueExpressions(
     }
   }
   return constants;
+}
+
+function getImportElements(importDeclaration: ts.ImportDeclaration): ts.NodeArray<ts.ImportSpecifier> {
+  const namedBindings = importDeclaration.importClause.namedBindings as ts.NamedImports;
+  if (!namedBindings.elements) {
+    return ([] as any) as ts.NodeArray<ts.ImportSpecifier>;
+  }
+  return namedBindings.elements;
 }
 
 function removeImportNames(namedBindings: ts.NamedImports, importNamesToRemove: string[]): ts.NamedImports {
