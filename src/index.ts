@@ -163,6 +163,12 @@ function getConstantValueExpressions(
                 exportSymbols,
                 typeChecker,
               );
+
+              if (localVariableToLookFor !== importedIdentifier) {
+                innerConstants[importedIdentifier] = innerConstants[localVariableToLookFor];
+                delete innerConstants[localVariableToLookFor];
+              }
+
               constants = {
                 ...constants,
                 ...innerConstants,
@@ -178,17 +184,25 @@ function getConstantValueExpressions(
                 ),
               );
 
-              const importSymbol = typeChecker.getSymbolAtLocation(importDeclaration.moduleSpecifier);
-              const importSymbols = typeChecker.getExportsOfModule(importSymbol);
-              const innerConstants = getConstantValueExpressions(
-                getImportElements(importDeclaration),
-                importSymbols,
-                typeChecker,
-              );
-              constants = {
-                ...constants,
-                ...innerConstants,
-              };
+              if (importDeclaration) {
+                const importSymbol = typeChecker.getSymbolAtLocation(importDeclaration.moduleSpecifier);
+                const importSymbols = typeChecker.getExportsOfModule(importSymbol);
+                const innerConstants = getConstantValueExpressions(
+                  getImportElements(importDeclaration),
+                  importSymbols,
+                  typeChecker,
+                );
+
+                if (localVariableToLookFor !== importedIdentifier) {
+                  innerConstants[importedIdentifier] = innerConstants[localVariableToLookFor];
+                  delete innerConstants[localVariableToLookFor];
+                }
+
+                constants = {
+                  ...constants,
+                  ...innerConstants,
+                };
+              }
             }
           }
         }
