@@ -30,91 +30,101 @@ function visitNode(node: ts.Node, program: ts.Program): any /* TODO */ {
   const typeChecker = program.getTypeChecker();
   // We want to replace `import { x } from 'file';`
   // with `const x = 'x';` if we can prove that `x` has a constant, compile time value
-  if (isImportDeclaration(node)) {
+  if (isImportDeclaration(node) && node.importClause) {
     const nodes: ts.Node[] = [node];
     const namedBindings = node.importClause.namedBindings;
 
-    if (isNamedImports(namedBindings)) {
+    if (namedBindings && isNamedImports(namedBindings)) {
       const importSymbol = typeChecker.getSymbolAtLocation(node.moduleSpecifier);
-      const exportSymbols = typeChecker.getExportsOfModule(importSymbol);
-      const constants = getConstantValueExpressions(namedBindings.elements, exportSymbols, typeChecker);
+      if (importSymbol) {
+        const exportSymbols = typeChecker.getExportsOfModule(importSymbol);
+        const constants = getConstantValueExpressions(namedBindings.elements, exportSymbols, typeChecker);
+
+        const identifierNames = Object.keys(constants);
+        if (identifierNames.length) {
+          identifierNames.forEach(i => {
+            nodes.push(
+              ts.createVariableDeclarationList(
+                [ts.createVariableDeclaration(i, undefined, constants[i])],
+                ts.NodeFlags.Const,
+              ),
+            );
+          });
+
+          const importNames = namedBindings.elements.map(e => e.name.escapedText.toString());
+          if (importNames.every(i => identifierNames.indexOf(i) !== -1)) {
+            nodes.splice(nodes.indexOf(node), 1);
+          } else {
+            const newNode = ts.createImportDeclaration(
+              node.decorators,
+              node.modifiers,
+              ts.createImportClause(node.importClause.name, removeImportNames(namedBindings, identifierNames)),
+              node.moduleSpecifier,
+            );
+            nodes.splice(nodes.indexOf(node), 1, newNode);
+          }
+
+          return nodes;
+        }
+      }
+    }
+  } else if (isExportDeclaration(node) && node.moduleSpecifier && node.exportClause) {
+    // We want to replace `export { x } from 'file';`
+    // with `const x = 'x';` if we can prove that `x` has a constant, compile time value
+    const nodes: ts.Node[] = [node];
+    const exportFromSymbol = typeChecker.getSymbolAtLocation(node.moduleSpecifier);
+    if (exportFromSymbol) {
+      const exportSymbols = typeChecker.getExportsOfModule(exportFromSymbol);
+      const constants = getConstantValueExpressions(node.exportClause.elements, exportSymbols, typeChecker);
 
       const identifierNames = Object.keys(constants);
       if (identifierNames.length) {
         identifierNames.forEach(i => {
           nodes.push(
-            ts.createVariableDeclarationList([ts.createVariableDeclaration(i, null, constants[i])], ts.NodeFlags.Const),
+            ts.createVariableDeclarationList(
+              [ts.createVariableDeclaration(i, undefined, constants[i])],
+              ts.NodeFlags.Const,
+            ),
           );
         });
 
-        const importNames = namedBindings.elements.map(e => e.name.escapedText.toString());
-        if (importNames.every(i => identifierNames.indexOf(i) !== -1)) {
+        const exportNames = node.exportClause.elements.map(e => e.name.escapedText.toString());
+        if (exportNames.every(i => identifierNames.indexOf(i) !== -1)) {
           nodes.splice(nodes.indexOf(node), 1);
+          nodes.push(
+            ts.createExportDeclaration(
+              node.decorators,
+              node.modifiers,
+              ts.createNamedExports(identifierNames.map(i => ts.createExportSpecifier(undefined, i))),
+            ),
+          );
         } else {
-          const newNode = ts.createImportDeclaration(
+          const newNode = ts.createExportDeclaration(
             node.decorators,
             node.modifiers,
-            ts.createImportClause(node.importClause.name, removeImportNames(namedBindings, identifierNames)),
+            ts.createNamedExports(
+              node.exportClause.elements.filter(
+                e => identifierNames.indexOf((e.propertyName || e.name).escapedText.toString()) === -1,
+              ),
+            ),
             node.moduleSpecifier,
+          );
+          nodes.push(
+            ts.createExportDeclaration(
+              node.decorators,
+              node.modifiers,
+              ts.createNamedExports(
+                identifierNames
+                  .filter(i => exportNames.indexOf(i) !== -1)
+                  .map(i => ts.createExportSpecifier(undefined, i)),
+              ),
+            ),
           );
           nodes.splice(nodes.indexOf(node), 1, newNode);
         }
 
         return nodes;
       }
-    }
-  } else if (isExportFromFileDeclaration(node)) {
-    // We want to replace `export { x } from 'file';`
-    // with `const x = 'x';` if we can prove that `x` has a constant, compile time value
-    const nodes: ts.Node[] = [node];
-    const exportFromSymbol = typeChecker.getSymbolAtLocation(node.moduleSpecifier);
-    const exportSymbols = typeChecker.getExportsOfModule(exportFromSymbol);
-    const constants = getConstantValueExpressions(node.exportClause.elements, exportSymbols, typeChecker);
-
-    const identifierNames = Object.keys(constants);
-    if (identifierNames.length) {
-      identifierNames.forEach(i => {
-        nodes.push(
-          ts.createVariableDeclarationList([ts.createVariableDeclaration(i, null, constants[i])], ts.NodeFlags.Const),
-        );
-      });
-
-      const exportNames = node.exportClause.elements.map(e => e.name.escapedText.toString());
-      if (exportNames.every(i => identifierNames.indexOf(i) !== -1)) {
-        nodes.splice(nodes.indexOf(node), 1);
-        nodes.push(
-          ts.createExportDeclaration(
-            node.decorators,
-            node.modifiers,
-            ts.createNamedExports(identifierNames.map(i => ts.createExportSpecifier(undefined, i))),
-          ),
-        );
-      } else {
-        const newNode = ts.createExportDeclaration(
-          node.decorators,
-          node.modifiers,
-          ts.createNamedExports(
-            node.exportClause.elements.filter(
-              e => identifierNames.indexOf((e.propertyName || e.name).escapedText.toString()) === -1,
-            ),
-          ),
-          node.moduleSpecifier,
-        );
-        nodes.push(
-          ts.createExportDeclaration(
-            node.decorators,
-            node.modifiers,
-            ts.createNamedExports(
-              identifierNames
-                .filter(i => exportNames.indexOf(i) !== -1)
-                .map(i => ts.createExportSpecifier(undefined, i)),
-            ),
-          ),
-        );
-        nodes.splice(nodes.indexOf(node), 1, newNode);
-      }
-
-      return nodes;
     }
   }
   return node;
@@ -131,7 +141,7 @@ function getConstantValueExpressions(
     const exported = exportSymbols.find(e => e.name === importedIdentifier);
     if (exported) {
       const declaration = exported.valueDeclaration;
-      let constantValueExpression: ts.Expression = null;
+      let constantValueExpression: ts.Expression | null = null;
 
       // This checks for `export const x = 'x';`
       if (declaration && isVariableDeclaration(declaration)) {
@@ -178,29 +188,33 @@ function getConstantValueExpressions(
               s => s.kind === ts.SyntaxKind.ExportDeclaration,
             ) as ts.ExportDeclaration[];
             const exportDeclaration = exportDeclarations.find(e =>
-              e.exportClause.elements.some(
-                e => (e.propertyName || e.name).escapedText.toString() === localVariableToLookFor,
-              ),
+              e.exportClause
+                ? e.exportClause.elements.some(
+                    e => (e.propertyName || e.name).escapedText.toString() === localVariableToLookFor,
+                  )
+                : false,
             );
 
             // This checks for `export { x } from 'file';` where `x` is the variable we want
             // If `moduleSpecifier` is set it means that it's a `export { x } from 'file';`
             // and not just a `export { x };`
-            if (exportDeclaration && exportDeclaration.moduleSpecifier) {
+            if (exportDeclaration && exportDeclaration.moduleSpecifier && exportDeclaration.exportClause) {
               const exportSymbol = typeChecker.getSymbolAtLocation(exportDeclaration.moduleSpecifier);
-              const exportSymbols = typeChecker.getExportsOfModule(exportSymbol);
-              const innerConstants = getConstantValueExpressions(
-                exportDeclaration.exportClause.elements,
-                exportSymbols,
-                typeChecker,
-              );
+              if (exportSymbol) {
+                const exportSymbols = typeChecker.getExportsOfModule(exportSymbol);
+                const innerConstants = getConstantValueExpressions(
+                  exportDeclaration.exportClause.elements,
+                  exportSymbols,
+                  typeChecker,
+                );
 
-              handleAlias(innerConstants, localVariableToLookFor, importedIdentifier);
+                handleAlias(innerConstants, localVariableToLookFor, importedIdentifier);
 
-              constants = {
-                ...constants,
-                ...innerConstants,
-              };
+                constants = {
+                  ...constants,
+                  ...innerConstants,
+                };
+              }
             } else {
               // This checks for `import { x } from 'file';` where `x` is the variable we want
               const importDeclarations = sourceFile.statements.filter(
@@ -213,19 +227,21 @@ function getConstantValueExpressions(
 
               if (importDeclaration) {
                 const importSymbol = typeChecker.getSymbolAtLocation(importDeclaration.moduleSpecifier);
-                const importSymbols = typeChecker.getExportsOfModule(importSymbol);
-                const innerConstants = getConstantValueExpressions(
-                  getImportElements(importDeclaration),
-                  importSymbols,
-                  typeChecker,
-                );
+                if (importSymbol) {
+                  const importSymbols = typeChecker.getExportsOfModule(importSymbol);
+                  const innerConstants = getConstantValueExpressions(
+                    getImportElements(importDeclaration),
+                    importSymbols,
+                    typeChecker,
+                  );
 
-                handleAlias(innerConstants, localVariableToLookFor, importedIdentifier);
+                  handleAlias(innerConstants, localVariableToLookFor, importedIdentifier);
 
-                constants = {
-                  ...constants,
-                  ...innerConstants,
-                };
+                  constants = {
+                    ...constants,
+                    ...innerConstants,
+                  };
+                }
               }
             }
           }
@@ -251,6 +267,9 @@ function handleAlias(constants: {}, localVariableToLookFor: string, importedIden
 }
 
 function getImportElements(importDeclaration: ts.ImportDeclaration): ts.NodeArray<ts.ImportSpecifier> {
+  if (!importDeclaration.importClause) {
+    return ([] as any) as ts.NodeArray<ts.ImportSpecifier>;
+  }
   const namedBindings = importDeclaration.importClause.namedBindings as ts.NamedImports;
   if (!namedBindings.elements) {
     return ([] as any) as ts.NodeArray<ts.ImportSpecifier>;
@@ -267,7 +286,10 @@ function removeImportNames(namedBindings: ts.NamedImports, importNamesToRemove: 
   };
 }
 
-function getConstantValue(expression: ts.Expression) {
+function getConstantValue(expression: ts.Expression | null | undefined) {
+  if (!expression) {
+    return null;
+  }
   if (expression.kind === ts.SyntaxKind.StringLiteral) {
     return ts.createStringLiteral((expression as ts.StringLiteral).text);
   } else if (expression.kind === ts.SyntaxKind.NumericLiteral) {
@@ -299,9 +321,9 @@ function isImportDeclaration(node: ts.Node): node is ts.ImportDeclaration {
   return false;
 }
 
-function isExportFromFileDeclaration(node: ts.Node): node is ts.ExportDeclaration {
+function isExportDeclaration(node: ts.Node): node is ts.ExportDeclaration {
   const exp = node as ts.ExportDeclaration;
-  if (exp.kind === ts.SyntaxKind.ExportDeclaration && exp.moduleSpecifier) {
+  if (exp.kind === ts.SyntaxKind.ExportDeclaration) {
     return true;
   }
   return false;
