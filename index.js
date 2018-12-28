@@ -1,3 +1,3 @@
-var loader = require('./dist');
+var transformer = require('./dist/src');
 
-module.exports = loader;
+module.exports = transformer;
