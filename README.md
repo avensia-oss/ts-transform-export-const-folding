@@ -34,3 +34,19 @@ yarn add @avensia-oss/ts-transform-export-const-folding
 
 Unfortunately TypeScript doesn't let you specifiy custom transformers in `tsconfig.json`. If you're using `ts-loader` with webpack you can specify it like this:
 https://github.com/TypeStrong/ts-loader#getcustomtransformers-----before-transformerfactory-after-transformerfactory--
+
+The default export of this module is a function which expects a `ts.Program` an returns a transformer function. Your config should look something like this:
+
+```
+const exportConstFoldingTransform = require('@avensia-oss/ts-transform-export-const-folding');
+
+return {
+  ...
+  options: {
+    getCustomTransformers: (program) => ({
+      before: [exportConstFoldingTransform(program)]
+    })
+  }
+  ...
+};
+```
