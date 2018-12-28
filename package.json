@@ -1,6 +1,6 @@
 {
   "name": "@avensia-oss/ts-transform-export-const-folding",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A TypeScript custom transformer that inlines values of constants",
   "main": "index.js",
   "keywords": [
