@@ -1,3 +1,3 @@
 var transformer = require('./dist/src');
 
-module.exports = transformer;
+module.exports = transformer.default;
