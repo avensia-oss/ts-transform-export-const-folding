@@ -26,6 +26,30 @@ let y = x;
   expectEqual(expected, compile(code));
 });
 
+test('default exports are ignored', () => {
+  const code = {
+    'file1.ts': `
+export default "constantvalue";
+`,
+    'file2.ts': `
+import x from "./file1";
+let y = x;
+    `,
+  };
+
+  const expected = {
+    'file1.js': `
+export default "constantvalue";
+`,
+    'file2.js': `
+import x from "./file1";
+let y = x;
+`,
+  };
+
+  expectEqual(expected, compile(code));
+});
+
 test('double const import removes import', () => {
   const code = {
     'file1.ts': `
